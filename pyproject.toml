@@ -36,6 +36,7 @@ sdss-validate-metadata = "multiband_qso.data.validation:main"
 qso-train-image = "multiband_qso.training.train_image_model:main"
 qso-evaluate-image = "multiband_qso.evaluation.evaluate_image_model:main"
 qso-image-benchmark-report = "multiband_qso.evaluation.reporting:main"
+qso-analyze-metadata-seeds = "multiband_qso.evaluation.analyze_metadata_seeds:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
