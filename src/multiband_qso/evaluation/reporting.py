@@ -75,6 +75,7 @@ def write_model_comparison(
         if metrics.empty:
             handle.write("No metrics found yet. Run training/evaluation first.\n")
             return
+        handle.write("Partial benchmark report: only models with available metrics are listed. Missing Phase 1 models have not been run yet.\n\n")
         display = metrics.copy()
         for column in ["accuracy", "precision_macro", "recall_macro", "f1_macro"]:
             display[column] = display[column].map(lambda value: f"{value:.4f}")

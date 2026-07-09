@@ -40,3 +40,11 @@ reports/image_benchmark/confusion_matrices/**
 !runs/image_benchmark/.gitkeep
 !reports/image_benchmark/.gitkeep
 !reports/image_benchmark/confusion_matrices/.gitkeep
+# Large generated experiment outputs.
+data/raw/
+data/processed/
+runs/
+*.pt
+*.pth
+*.ckpt
+reports/image_benchmark/confusion_matrices/

@@ -111,6 +111,47 @@ Artefatos esperados no smoke test:
 - `reports/image_benchmark/model_comparison.md`
 
 O `metadata.csv` preserva identificadores, coordenadas, classe, redshift espectroscopico, magnitudes, extincoes e cores derivadas para reaproveitamento futuro em modelos tabulares e hibridos. Os cutouts JPEG sao adequados para este benchmark inicial de PDI, mas nao substituem FITS calibrados em analises cientificas mais rigorosas.
+## Primeira escala experimental da Fase 1
+
+Depois que o smoke test passar, use `configs/image_benchmark_small.yaml` para uma primeira execucao real ainda controlada. Essa configuracao usa cerca de 900 objetos no total: 300 `STAR`, 300 `GALAXY` e 300 `QSO`, com split estratificado 70/15/15.
+
+Diferença entre configs:
+
+- `configs/image_benchmark_smoke.yaml`: validacao funcional minima, 10 objetos por classe, 2 epocas, CPU, usada para confirmar o pipeline de ponta a ponta.
+- `configs/image_benchmark_small.yaml`: primeira escala experimental controlada, 300 objetos por classe, 10 epocas, `device: auto`, usada para medir um baseline inicial com `simple_cnn`.
+
+A config pequena escreve em diretorios separados para nao sobrescrever o smoke test:
+
+- `data/processed/image_sample_small/`
+- `data/raw/images_small/`
+
+Executar o pipeline pequeno real:
+
+```bash
+sdss-fetch-catalog --config configs/image_benchmark_small.yaml
+sdss-build-metadata --config configs/image_benchmark_small.yaml
+sdss-download-cutouts --config configs/image_benchmark_small.yaml
+sdss-validate-metadata --config configs/image_benchmark_small.yaml
+```
+
+Treinar e avaliar primeiro apenas o baseline `simple_cnn`:
+
+```bash
+qso-train-image --config configs/image_benchmark_small.yaml --model simple_cnn --run-name small-simple-cnn
+qso-evaluate-image --config configs/image_benchmark_small.yaml \
+  --model simple_cnn \
+  --checkpoint runs/image_benchmark/simple_cnn/small-simple-cnn/checkpoint_best.pt
+qso-image-benchmark-report --runs-dir runs/image_benchmark
+```
+
+Interprete esse resultado como benchmark parcial. Antes de treinar `resnet18` e `densenet121`, verifique se a loss caiu, se as metricas passaram de chance level, se existe overfitting evidente e se a matriz de confusao colapsou em uma unica classe. Se o baseline estiver estavel, os proximos comandos serao:
+
+```bash
+qso-train-image --config configs/image_benchmark_small.yaml --model resnet18 --run-name small-resnet18
+qso-train-image --config configs/image_benchmark_small.yaml --model densenet121 --run-name small-densenet121
+```
+
+Esses comandos ainda pertencem apenas a Fase 1. Nao envolvem modelos tabulares, redshift fotometrico nem arquitetura multimodal.
 ## Pipeline da Fase 1
 
 Buscar candidatos no SDSS:
