@@ -41,6 +41,24 @@ def _model_sort_key(model: str) -> int:
     return MODEL_ORDER.index(model) if model in MODEL_ORDER else len(MODEL_ORDER)
 
 
+def _is_pretrained(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return False
+
+
+def _run_type(value: Any) -> str:
+    return "pretrained" if _is_pretrained(value) else "from scratch"
+
+
+def _with_run_type(metrics: pd.DataFrame) -> pd.DataFrame:
+    metrics = metrics.copy()
+    metrics["run_type"] = metrics["pretrained"].map(_run_type)
+    return metrics
+
+
 def _load_metric_files(runs_dir: str | Path) -> list[dict[str, Any]]:
     loaded: list[dict[str, Any]] = []
     for metrics_path in Path(runs_dir).glob("*/*/metrics*.json"):
@@ -134,22 +152,23 @@ def _format_metric_columns(metrics: pd.DataFrame) -> pd.DataFrame:
 def _format_summary_columns(summary: pd.DataFrame) -> pd.DataFrame:
     display = summary.copy()
     for column in display.columns:
-        if column != "model":
+        if column not in {"model", "run"}:
             display[column] = display[column].map(lambda value: "missing" if pd.isna(value) else f"{value:.4f}")
     return display
-
 
 def _seed_table(test_metrics: pd.DataFrame, seed: str) -> pd.DataFrame:
     seed_metrics = test_metrics[test_metrics["seed"] == seed].copy()
     seed_metrics["model_order"] = seed_metrics["model"].map(_model_sort_key)
-    seed_metrics = seed_metrics.sort_values("model_order")
-    columns = ["model", "accuracy", "precision_macro", "recall_macro", "f1_macro", "best_epoch", "run_dir"]
+    seed_metrics["pretrained_order"] = seed_metrics["pretrained"].map(lambda value: 1 if _is_pretrained(value) else 0)
+    seed_metrics = seed_metrics.sort_values(["model_order", "pretrained_order"])
+    seed_metrics = _with_run_type(seed_metrics)
+    columns = ["model", "run_type", "accuracy", "precision_macro", "recall_macro", "f1_macro", "best_epoch", "run_dir"]
     return seed_metrics[columns]
 
 
-def _aggregate_table(test_metrics: pd.DataFrame, metric: str) -> pd.DataFrame:
+def _aggregate_table(test_metrics: pd.DataFrame, metric: str, *, models: list[str] | None = None) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
-    for model in MODEL_ORDER:
+    for model in models or MODEL_ORDER:
         model_metrics = test_metrics[test_metrics["model"] == model]
         values = {
             seed: model_metrics.loc[model_metrics["seed"] == seed, metric].iloc[0]
@@ -169,6 +188,72 @@ def _aggregate_table(test_metrics: pd.DataFrame, metric: str) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows)
+
+
+def _transfer_learning_pilot_table(test_metrics: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    resnet_metrics = test_metrics[test_metrics["model"] == "resnet18"].copy()
+    for label, pretrained in [("resnet18 from scratch", False), ("resnet18 pretrained", True)]:
+        run_metrics = resnet_metrics[resnet_metrics["pretrained"].map(_is_pretrained) == pretrained]
+        f1_values = {
+            seed: run_metrics.loc[run_metrics["seed"] == seed, "f1_macro"].iloc[0]
+            if not run_metrics.loc[run_metrics["seed"] == seed].empty
+            else pd.NA
+            for seed in SEED_ORDER
+        }
+        acc_values = {
+            seed: run_metrics.loc[run_metrics["seed"] == seed, "accuracy"].iloc[0]
+            if not run_metrics.loc[run_metrics["seed"] == seed].empty
+            else pd.NA
+            for seed in SEED_ORDER
+        }
+        f1_present = pd.Series([value for value in f1_values.values() if not pd.isna(value)], dtype="float64")
+        acc_present = pd.Series([value for value in acc_values.values() if not pd.isna(value)], dtype="float64")
+        rows.append(
+            {
+                "run": label,
+                "F1 seed 42": f1_values["42"],
+                "F1 seed 123": f1_values["123"],
+                "F1 seed 13": f1_values["13"],
+                "mean F1": f1_present.mean() if not f1_present.empty else pd.NA,
+                "std F1": f1_present.std(ddof=0) if len(f1_present) > 1 else 0.0 if len(f1_present) == 1 else pd.NA,
+                "acc seed 42": acc_values["42"],
+                "acc seed 123": acc_values["123"],
+                "acc seed 13": acc_values["13"],
+                "mean acc": acc_present.mean() if not acc_present.empty else pd.NA,
+                "std acc": acc_present.std(ddof=0) if len(acc_present) > 1 else 0.0 if len(acc_present) == 1 else pd.NA,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _transfer_learning_pilot_lines(pilot: pd.DataFrame) -> list[str]:
+    if pilot.empty or len(pilot) < 2:
+        return ["Transfer learning pilot metrics are incomplete for comparison."]
+    scratch = pilot[pilot["run"] == "resnet18 from scratch"].iloc[0]
+    pretrained = pilot[pilot["run"] == "resnet18 pretrained"].iloc[0]
+    if pd.isna(scratch["mean F1"]) or pd.isna(pretrained["mean F1"]):
+        return ["Transfer learning pilot metrics are incomplete for comparison."]
+
+    mean_delta = pretrained["mean F1"] - scratch["mean F1"]
+    std_delta = scratch["std F1"] - pretrained["std F1"]
+    seed13_delta = pretrained["F1 seed 13"] - scratch["F1 seed 13"]
+    return [
+        (
+            f"`resnet18 pretrained` achieved higher mean F1 than `resnet18` from scratch "
+            f"({pretrained['mean F1']:.4f} vs {scratch['mean F1']:.4f}, delta {mean_delta:+.4f})."
+        ),
+        (
+            f"`resnet18 pretrained` strongly reduced variation across seeds "
+            f"(F1 std {pretrained['std F1']:.4f} vs {scratch['std F1']:.4f}, reduction {std_delta:.4f})."
+        ),
+        (
+            f"The main gain came from recovering seed 13 "
+            f"(F1 {pretrained['F1 seed 13']:.4f} vs {scratch['F1 seed 13']:.4f}, delta {seed13_delta:+.4f})."
+        ),
+        "This result suggests using pretrained image backbones as the default for the next scale of the image-classification benchmark.",
+        "It still does not support any conclusion about photometric redshift, because Phase 1 is only image classification.",
+    ]
 
 
 def _best_and_stability_lines(test_metrics: pd.DataFrame) -> tuple[str, str]:
@@ -241,7 +326,7 @@ def write_model_comparison(
             "it is still not the final large-scale experiment.\n\n"
         )
         handle.write(
-            "All currently configured small runs use `pretrained=false`. JPEG RGB cutouts are useful for this initial PDI benchmark, "
+            "The primary small benchmark uses from-scratch training for `simple_cnn`, `resnet18` and `densenet121`; a separate ResNet18 transfer-learning pilot uses `pretrained=true`. JPEG RGB cutouts are useful for this initial PDI benchmark, "
             "but they may not carry enough calibrated information to separate point-like QSO and STAR objects perfectly.\n\n"
         )
         if metrics.empty:
@@ -259,8 +344,10 @@ def write_model_comparison(
         for seed in SEED_ORDER:
             _write_seed_section(handle, test_metrics, metric_files, seed)
 
-        handle.write("## Aggregate F1 Macro By Model\n\n")
-        f1_summary = _aggregate_table(test_metrics, "f1_macro")
+        handle.write("## Benchmark From Scratch - Aggregate F1 Macro By Model\n\n")
+        scratch_metrics = test_metrics[~test_metrics["pretrained"].map(_is_pretrained)].copy()
+
+        f1_summary = _aggregate_table(scratch_metrics, "f1_macro")
         f1_summary = f1_summary.rename(
             columns={
                 "f1_macro seed 42": "F1 seed 42",
@@ -273,8 +360,8 @@ def write_model_comparison(
         handle.write(_markdown_table(_format_summary_columns(f1_summary)))
         handle.write("\n\n")
 
-        handle.write("## Aggregate Accuracy By Model\n\n")
-        acc_summary = _aggregate_table(test_metrics, "accuracy")
+        handle.write("## Benchmark From Scratch - Aggregate Accuracy By Model\n\n")
+        acc_summary = _aggregate_table(scratch_metrics, "accuracy")
         acc_summary = acc_summary.rename(
             columns={
                 "accuracy seed 42": "acc seed 42",
@@ -287,8 +374,15 @@ def write_model_comparison(
         handle.write(_markdown_table(_format_summary_columns(acc_summary)))
         handle.write("\n\n")
 
-        best_line, stable_line = _best_and_stability_lines(test_metrics)
-        handle.write("## Robustness Interpretation\n\n")
+        handle.write("## Transfer Learning Pilot - ResNet18\n\n")
+        pilot_summary = _transfer_learning_pilot_table(test_metrics)
+        handle.write(_markdown_table(_format_summary_columns(pilot_summary)))
+        handle.write("\n\n")
+        for line in _transfer_learning_pilot_lines(pilot_summary):
+            handle.write(line + "\n\n")
+
+        best_line, stable_line = _best_and_stability_lines(scratch_metrics)
+        handle.write("## From-Scratch Benchmark Interpretation\n\n")
         handle.write(best_line + "\n\n")
         handle.write(stable_line + "\n\n")
         handle.write(
