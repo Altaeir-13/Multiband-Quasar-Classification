@@ -12,6 +12,7 @@ CLASS_NAMES = ["STAR", "GALAXY", "QSO"]
 METRIC_COLUMNS = ["accuracy", "precision_macro", "recall_macro", "f1_macro"]
 MODEL_ORDER = ["simple_cnn", "resnet18", "densenet121"]
 SEED_ORDER = ["42", "123", "13"]
+SCALE_ORDER = ["small", "medium"]
 
 
 def _flatten_metrics(metrics: dict) -> dict:
@@ -35,6 +36,17 @@ def _seed_from_run_dir(run_dir: str) -> str:
     if "seed13" in lowered:
         return "13"
     return "42"
+
+
+def _scale_from_run_dir(run_dir: str) -> str:
+    run_name = Path(str(run_dir)).name.lower()
+    if run_name.startswith("medium-"):
+        return "medium"
+    if run_name.startswith("small-"):
+        return "small"
+    if run_name.startswith("smoke-"):
+        return "smoke"
+    return "unknown"
 
 
 def _model_sort_key(model: str) -> int:
@@ -84,14 +96,17 @@ def collect_metrics(runs_dir: str | Path) -> pd.DataFrame:
                 "best_epoch",
                 "run_dir",
                 "seed",
+                "scale",
             ]
         )
     frame = pd.DataFrame(rows)
     frame["seed"] = frame["run_dir"].astype(str).map(_seed_from_run_dir)
+    frame["scale"] = frame["run_dir"].astype(str).map(_scale_from_run_dir)
     frame["model_order"] = frame["model"].map(_model_sort_key)
     frame["seed_order"] = frame["seed"].map(lambda seed: SEED_ORDER.index(seed) if seed in SEED_ORDER else len(SEED_ORDER))
-    frame = frame.sort_values(["seed_order", "split", "model_order"])
-    return frame.drop(columns=["model_order", "seed_order"])
+    frame["scale_order"] = frame["scale"].map(lambda scale: SCALE_ORDER.index(scale) if scale in SCALE_ORDER else len(SCALE_ORDER))
+    frame = frame.sort_values(["scale_order", "seed_order", "split", "model_order"])
+    return frame.drop(columns=["model_order", "seed_order", "scale_order"])
 
 
 def _markdown_table(frame: pd.DataFrame) -> str:
@@ -156,6 +171,7 @@ def _format_summary_columns(summary: pd.DataFrame) -> pd.DataFrame:
             display[column] = display[column].map(lambda value: "missing" if pd.isna(value) else f"{value:.4f}")
     return display
 
+
 def _seed_table(test_metrics: pd.DataFrame, seed: str) -> pd.DataFrame:
     seed_metrics = test_metrics[test_metrics["seed"] == seed].copy()
     seed_metrics["model_order"] = seed_metrics["model"].map(_model_sort_key)
@@ -164,6 +180,16 @@ def _seed_table(test_metrics: pd.DataFrame, seed: str) -> pd.DataFrame:
     seed_metrics = _with_run_type(seed_metrics)
     columns = ["model", "run_type", "accuracy", "precision_macro", "recall_macro", "f1_macro", "best_epoch", "run_dir"]
     return seed_metrics[columns]
+
+
+def _run_label(metrics: pd.Series | dict[str, Any]) -> str:
+    if isinstance(metrics, pd.Series):
+        model = str(metrics["model"])
+        pretrained = metrics["pretrained"]
+    else:
+        model = str(metrics.get("model"))
+        pretrained = metrics.get("pretrained")
+    return f"{model} pretrained" if _is_pretrained(pretrained) else model
 
 
 def _aggregate_table(test_metrics: pd.DataFrame, metric: str, *, models: list[str] | None = None) -> pd.DataFrame:
@@ -278,8 +304,15 @@ def _filter_metric_files(metric_files: list[dict[str, Any]], metrics: pd.DataFra
     ]
 
 
-def _write_seed_section(handle, test_metrics: pd.DataFrame, metric_files: list[dict[str, Any]], seed: str) -> None:
-    handle.write(f"## Benchmark small - seed {seed}\n\n")
+def _write_seed_section(
+    handle,
+    test_metrics: pd.DataFrame,
+    metric_files: list[dict[str, Any]],
+    seed: str,
+    *,
+    scale: str = "small",
+) -> None:
+    handle.write(f"## Benchmark {scale} - seed {seed}\n\n")
     table = _seed_table(test_metrics, seed)
     if table.empty:
         handle.write("No valid test metrics for this seed.\n\n")
@@ -288,14 +321,99 @@ def _write_seed_section(handle, test_metrics: pd.DataFrame, metric_files: list[d
     handle.write("\n\n")
     seed_files = _filter_metric_files(metric_files, test_metrics[test_metrics["seed"] == seed])
     test_runs = [metrics for metrics in seed_files if metrics.get("split") == "test"]
-    for metrics in sorted(test_runs, key=lambda item: _model_sort_key(str(item.get("model")))):
+    for metrics in sorted(
+        test_runs,
+        key=lambda item: (_model_sort_key(str(item.get("model"))), 1 if _is_pretrained(item.get("pretrained")) else 0),
+    ):
         run_dir = _flatten_metrics(metrics)["run_dir"]
-        handle.write(f"### {metrics.get('model')} - `{Path(run_dir).name}`\n\n")
+        handle.write(f"### {_run_label(metrics)} - `{Path(run_dir).name}`\n\n")
         handle.write(_confusion_matrix_section(metrics))
         handle.write("\n\n")
         confusions = _dominant_confusions(metrics)[:4]
         if confusions:
             handle.write("Dominant off-diagonal confusions: " + "; ".join(confusions) + ".\n\n")
+
+
+def _small_medium_comparison(small_metrics: pd.DataFrame, medium_metrics: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    comparisons = [
+        ("simple_cnn", False, "simple_cnn"),
+        ("resnet18", True, "resnet18 pretrained"),
+        ("densenet121", False, "densenet121"),
+    ]
+    small_seed = small_metrics[small_metrics["seed"] == "42"]
+    medium_seed = medium_metrics[medium_metrics["seed"] == "42"]
+    for model, pretrained, label in comparisons:
+        small_run = small_seed[
+            (small_seed["model"] == model) & (small_seed["pretrained"].map(_is_pretrained) == pretrained)
+        ]
+        medium_run = medium_seed[
+            (medium_seed["model"] == model) & (medium_seed["pretrained"].map(_is_pretrained) == pretrained)
+        ]
+        if small_run.empty or medium_run.empty:
+            continue
+        small_row = small_run.iloc[0]
+        medium_row = medium_run.iloc[0]
+        rows.append(
+            {
+                "run": label,
+                "small F1": small_row["f1_macro"],
+                "medium F1": medium_row["f1_macro"],
+                "delta F1": medium_row["f1_macro"] - small_row["f1_macro"],
+                "small acc": small_row["accuracy"],
+                "medium acc": medium_row["accuracy"],
+                "delta acc": medium_row["accuracy"] - small_row["accuracy"],
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def _write_medium_comparison(handle, small_metrics: pd.DataFrame, medium_metrics: pd.DataFrame) -> None:
+    comparison = _small_medium_comparison(small_metrics, medium_metrics)
+    if comparison.empty:
+        return
+    handle.write("### Small vs medium - seed 42\n\n")
+    handle.write(_markdown_table(_format_summary_columns(comparison)))
+    handle.write("\n\n")
+
+
+def _medium_interpretation(medium_metrics: pd.DataFrame, small_metrics: pd.DataFrame) -> list[str]:
+    if medium_metrics.empty:
+        return []
+    medium_seed = medium_metrics[medium_metrics["seed"] == "42"].copy()
+    if medium_seed.empty:
+        return []
+    best = medium_seed.sort_values("f1_macro", ascending=False).iloc[0]
+    lines = [
+        (
+            f"Best medium seed 42 model by test F1 macro: `{_run_label(best)}` "
+            f"with F1=`{best['f1_macro']:.4f}` and accuracy=`{best['accuracy']:.4f}`."
+        )
+    ]
+    pretrained = medium_seed[
+        (medium_seed["model"] == "resnet18") & (medium_seed["pretrained"].map(_is_pretrained))
+    ]
+    if not pretrained.empty:
+        pretrained_row = pretrained.iloc[0]
+        lines.append(
+            "`resnet18 pretrained` remains the primary baseline candidate at medium scale "
+            f"with F1=`{pretrained_row['f1_macro']:.4f}`."
+        )
+    comparison = _small_medium_comparison(small_metrics, medium_metrics)
+    if not comparison.empty:
+        improved = comparison[comparison["delta F1"] > 0]
+        if improved.empty:
+            lines.append("Medium seed 42 did not improve F1 over small seed 42 for the matched runs.")
+        else:
+            labels = ", ".join(f"`{row.run}`" for row in improved.itertuples(index=False))
+            lines.append(f"Medium seed 42 improved F1 over small seed 42 for: {labels}.")
+    lines.append(
+        "A single medium seed cannot prove lower variance or instability reduction; repeat medium on more seeds before drawing a stability conclusion."
+    )
+    lines.append(
+        "Inspect QSO -> STAR, QSO -> GALAXY and GALAXY -> STAR confusions before either scaling to n_per_class=2000 or adding new architectures."
+    )
+    return lines
 
 
 def write_model_comparison(
@@ -312,6 +430,8 @@ def write_model_comparison(
     metrics = metrics.copy()
     if "seed" not in metrics.columns and "run_dir" in metrics.columns:
         metrics["seed"] = metrics["run_dir"].astype(str).map(_seed_from_run_dir)
+    if "scale" not in metrics.columns and "run_dir" in metrics.columns:
+        metrics["scale"] = metrics["run_dir"].astype(str).map(_scale_from_run_dir)
     for optional_column in ["best_epoch", "pretrained"]:
         if optional_column not in metrics.columns:
             metrics[optional_column] = "not_recorded"
@@ -321,9 +441,9 @@ def write_model_comparison(
     with md_path.open("w", encoding="utf-8") as handle:
         handle.write("# Image Benchmark Results\n\n")
         handle.write(
-            "Phase 1 controlled small benchmark using SDSS JPEG RGB cutouts. "
-            "This report compares image classifiers across seeds 42, 123 and 13; "
-            "it is still not the final large-scale experiment.\n\n"
+            "Phase 1 controlled image benchmark using SDSS JPEG RGB cutouts. "
+            "Small runs compare seeds 42, 123 and 13; medium runs add a controlled n_per_class=1000 seed 42 scale. "
+            "This is still not the final large-scale experiment.\n\n"
         )
         handle.write(
             "The primary small benchmark uses from-scratch training for `simple_cnn`, `resnet18` and `densenet121`; a separate ResNet18 transfer-learning pilot uses `pretrained=true`. JPEG RGB cutouts are useful for this initial PDI benchmark, "
@@ -341,11 +461,20 @@ def write_model_comparison(
                 "they remain in metrics.csv for traceability.\n\n"
             )
 
+        small_test_metrics = test_metrics[test_metrics["scale"] != "medium"].copy()
+        medium_test_metrics = test_metrics[test_metrics["scale"] == "medium"].copy()
+
         for seed in SEED_ORDER:
-            _write_seed_section(handle, test_metrics, metric_files, seed)
+            _write_seed_section(handle, small_test_metrics, metric_files, seed, scale="small")
+
+        if not medium_test_metrics.empty:
+            _write_seed_section(handle, medium_test_metrics, metric_files, "42", scale="medium")
+            _write_medium_comparison(handle, small_test_metrics, medium_test_metrics)
+            for line in _medium_interpretation(medium_test_metrics, small_test_metrics):
+                handle.write(line + "\n\n")
 
         handle.write("## Benchmark From Scratch - Aggregate F1 Macro By Model\n\n")
-        scratch_metrics = test_metrics[~test_metrics["pretrained"].map(_is_pretrained)].copy()
+        scratch_metrics = small_test_metrics[~small_test_metrics["pretrained"].map(_is_pretrained)].copy()
 
         f1_summary = _aggregate_table(scratch_metrics, "f1_macro")
         f1_summary = f1_summary.rename(
@@ -375,7 +504,7 @@ def write_model_comparison(
         handle.write("\n\n")
 
         handle.write("## Transfer Learning Pilot - ResNet18\n\n")
-        pilot_summary = _transfer_learning_pilot_table(test_metrics)
+        pilot_summary = _transfer_learning_pilot_table(small_test_metrics)
         handle.write(_markdown_table(_format_summary_columns(pilot_summary)))
         handle.write("\n\n")
         for line in _transfer_learning_pilot_lines(pilot_summary):

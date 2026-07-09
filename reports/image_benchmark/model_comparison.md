@@ -1,6 +1,6 @@
 # Image Benchmark Results
 
-Phase 1 controlled small benchmark using SDSS JPEG RGB cutouts. This report compares image classifiers across seeds 42, 123 and 13; it is still not the final large-scale experiment.
+Phase 1 controlled image benchmark using SDSS JPEG RGB cutouts. Small runs compare seeds 42, 123 and 13; medium runs add a controlled n_per_class=1000 seed 42 scale. This is still not the final large-scale experiment.
 
 The primary small benchmark uses from-scratch training for `simple_cnn`, `resnet18` and `densenet121`; a separate ResNet18 transfer-learning pilot uses `pretrained=true`. JPEG RGB cutouts are useful for this initial PDI benchmark, but they may not carry enough calibrated information to separate point-like QSO and STAR objects perfectly.
 
@@ -35,7 +35,7 @@ Dominant off-diagonal confusions: GALAXY -> STAR: 19; QSO -> STAR: 10; STAR -> Q
 
 Dominant off-diagonal confusions: QSO -> STAR: 13; GALAXY -> STAR: 5; GALAXY -> QSO: 5; QSO -> GALAXY: 2.
 
-### resnet18 - `small-seed42-resnet18-pretrained`
+### resnet18 pretrained - `small-seed42-resnet18-pretrained`
 
 | true\pred | STAR | GALAXY | QSO |
 | --------- | ---- | ------ | --- |
@@ -84,7 +84,7 @@ Dominant off-diagonal confusions: GALAXY -> QSO: 17; STAR -> QSO: 16; GALAXY -> 
 
 Dominant off-diagonal confusions: QSO -> GALAXY: 16; GALAXY -> STAR: 9; QSO -> STAR: 7; STAR -> GALAXY: 2.
 
-### resnet18 - `small-seed123-resnet18-pretrained`
+### resnet18 pretrained - `small-seed123-resnet18-pretrained`
 
 | true\pred | STAR | GALAXY | QSO |
 | --------- | ---- | ------ | --- |
@@ -133,7 +133,7 @@ Dominant off-diagonal confusions: GALAXY -> STAR: 15; QSO -> STAR: 12; QSO -> GA
 
 Dominant off-diagonal confusions: GALAXY -> QSO: 22; STAR -> QSO: 20; QSO -> GALAXY: 7; GALAXY -> STAR: 2.
 
-### resnet18 - `small-seed13-resnet18-pretrained`
+### resnet18 pretrained - `small-seed13-resnet18-pretrained`
 
 | true\pred | STAR | GALAXY | QSO |
 | --------- | ---- | ------ | --- |
@@ -152,6 +152,62 @@ Dominant off-diagonal confusions: STAR -> QSO: 7; QSO -> STAR: 7; QSO -> GALAXY:
 | QSO       | 16   | 26     | 3   |
 
 Dominant off-diagonal confusions: QSO -> GALAXY: 26; QSO -> STAR: 16; STAR -> GALAXY: 9; GALAXY -> STAR: 6.
+
+## Benchmark medium - seed 42
+
+| model       | run_type     | accuracy | precision_macro | recall_macro | f1_macro | best_epoch | run_dir                                                  |
+| ----------- | ------------ | -------- | --------------- | ------------ | -------- | ---------- | -------------------------------------------------------- |
+| simple_cnn  | from scratch | 0.7356   | 0.7670          | 0.7356       | 0.7217   | 5          | runs\image_benchmark\simple_cnn\medium-simple-cnn        |
+| resnet18    | pretrained   | 0.8933   | 0.8980          | 0.8933       | 0.8938   | 4          | runs\image_benchmark\resnet18\medium-resnet18-pretrained |
+| densenet121 | from scratch | 0.8778   | 0.8781          | 0.8778       | 0.8778   | 4          | runs\image_benchmark\densenet121\medium-densenet121      |
+
+### simple_cnn - `medium-simple-cnn`
+
+| true\pred | STAR | GALAXY | QSO |
+| --------- | ---- | ------ | --- |
+| STAR      | 137  | 7      | 6   |
+| GALAXY    | 23   | 125    | 2   |
+| QSO       | 26   | 55     | 69  |
+
+Dominant off-diagonal confusions: QSO -> GALAXY: 55; QSO -> STAR: 26; GALAXY -> STAR: 23; STAR -> GALAXY: 7.
+
+### resnet18 pretrained - `medium-resnet18-pretrained`
+
+| true\pred | STAR | GALAXY | QSO |
+| --------- | ---- | ------ | --- |
+| STAR      | 136  | 0      | 14  |
+| GALAXY    | 8    | 127    | 15  |
+| QSO       | 4    | 7      | 139 |
+
+Dominant off-diagonal confusions: GALAXY -> QSO: 15; STAR -> QSO: 14; GALAXY -> STAR: 8; QSO -> GALAXY: 7.
+
+### densenet121 - `medium-densenet121`
+
+| true\pred | STAR | GALAXY | QSO |
+| --------- | ---- | ------ | --- |
+| STAR      | 130  | 7      | 13  |
+| GALAXY    | 11   | 131    | 8   |
+| QSO       | 4    | 12     | 134 |
+
+Dominant off-diagonal confusions: STAR -> QSO: 13; QSO -> GALAXY: 12; GALAXY -> STAR: 11; GALAXY -> QSO: 8.
+
+### Small vs medium - seed 42
+
+| run                 | small F1 | medium F1 | delta F1 | small acc | medium acc | delta acc |
+| ------------------- | -------- | --------- | -------- | --------- | ---------- | --------- |
+| simple_cnn          | 0.6279   | 0.7217    | 0.0939   | 0.6370    | 0.7356     | 0.0985    |
+| resnet18 pretrained | 0.7797   | 0.8938    | 0.1141   | 0.7778    | 0.8933     | 0.1156    |
+| densenet121         | 0.7761   | 0.8778    | 0.1017   | 0.7852    | 0.8778     | 0.0926    |
+
+Best medium seed 42 model by test F1 macro: `resnet18 pretrained` with F1=`0.8938` and accuracy=`0.8933`.
+
+`resnet18 pretrained` remains the primary baseline candidate at medium scale with F1=`0.8938`.
+
+Medium seed 42 improved F1 over small seed 42 for: `simple_cnn`, `resnet18 pretrained`, `densenet121`.
+
+A single medium seed cannot prove lower variance or instability reduction; repeat medium on more seeds before drawing a stability conclusion.
+
+Inspect QSO -> STAR, QSO -> GALAXY and GALAXY -> STAR confusions before either scaling to n_per_class=2000 or adding new architectures.
 
 ## Benchmark From Scratch - Aggregate F1 Macro By Model
 
