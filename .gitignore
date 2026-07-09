@@ -48,3 +48,17 @@ runs/
 *.pth
 *.ckpt
 reports/image_benchmark/confusion_matrices/
+# Project data and experiment artifacts
+data/
+runs/
+
+# Model checkpoints and trained artifacts
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.joblib
+*.pkl
+
+# Generated reports/artifacts
+reports/image_benchmark/confusion_matrices/
