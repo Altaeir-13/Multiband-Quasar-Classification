@@ -165,6 +165,8 @@ def train_image_model(
     metrics["model"] = model_name
     metrics["split"] = "val"
     metrics["run_dir"] = str(run_dir)
+    metrics["pretrained"] = bool(training.get("pretrained", False))
+    metrics["best_epoch"] = int(checkpoint["epoch"])
     save_json(metrics, run_dir / "metrics.json")
     return run_dir
 

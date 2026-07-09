@@ -82,6 +82,8 @@ def evaluate_checkpoint(
     metrics["model"] = model_name
     metrics["split"] = split
     metrics["checkpoint"] = str(checkpoint_path)
+    metrics["pretrained"] = bool(checkpoint.get("config", {}).get("training", {}).get("pretrained", False))
+    metrics["best_epoch"] = int(checkpoint.get("epoch", -1))
 
     destination = Path(output_dir) if output_dir is not None else Path(checkpoint_path).parent
     destination.mkdir(parents=True, exist_ok=True)
