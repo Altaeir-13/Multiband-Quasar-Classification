@@ -193,9 +193,10 @@ Dominant off-diagonal confusions: STAR -> QSO: 13; QSO -> GALAXY: 12; GALAXY -> 
 
 ## Benchmark medium - seed 123
 
-| model    | run_type   | accuracy | precision_macro | recall_macro | f1_macro | best_epoch | run_dir                                                          |
-| -------- | ---------- | -------- | --------------- | ------------ | -------- | ---------- | ---------------------------------------------------------------- |
-| resnet18 | pretrained | 0.9000   | 0.9010          | 0.9000       | 0.8998   | 7          | runs\image_benchmark\resnet18\medium-seed123-resnet18-pretrained |
+| model       | run_type     | accuracy | precision_macro | recall_macro | f1_macro | best_epoch | run_dir                                                          |
+| ----------- | ------------ | -------- | --------------- | ------------ | -------- | ---------- | ---------------------------------------------------------------- |
+| resnet18    | pretrained   | 0.9000   | 0.9010          | 0.9000       | 0.8998   | 7          | runs\image_benchmark\resnet18\medium-seed123-resnet18-pretrained |
+| densenet121 | from scratch | 0.5867   | 0.7247          | 0.5867       | 0.5189   | 5          | runs\image_benchmark\densenet121\medium-seed123-densenet121      |
 
 ### resnet18 pretrained - `medium-seed123-resnet18-pretrained`
 
@@ -207,11 +208,22 @@ Dominant off-diagonal confusions: STAR -> QSO: 13; QSO -> GALAXY: 12; GALAXY -> 
 
 Dominant off-diagonal confusions: QSO -> STAR: 18; STAR -> QSO: 12; QSO -> GALAXY: 7; GALAXY -> STAR: 5.
 
+### densenet121 - `medium-seed123-densenet121`
+
+| true\pred | STAR | GALAXY | QSO |
+| --------- | ---- | ------ | --- |
+| STAR      | 149  | 0      | 1   |
+| GALAXY    | 44   | 104    | 2   |
+| QSO       | 131  | 8      | 11  |
+
+Dominant off-diagonal confusions: QSO -> STAR: 131; GALAXY -> STAR: 44; QSO -> GALAXY: 8; GALAXY -> QSO: 2.
+
 ## Benchmark medium - seed 13
 
-| model    | run_type   | accuracy | precision_macro | recall_macro | f1_macro | best_epoch | run_dir                                                         |
-| -------- | ---------- | -------- | --------------- | ------------ | -------- | ---------- | --------------------------------------------------------------- |
-| resnet18 | pretrained | 0.8600   | 0.8609          | 0.8600       | 0.8591   | 4          | runs\image_benchmark\resnet18\medium-seed13-resnet18-pretrained |
+| model       | run_type     | accuracy | precision_macro | recall_macro | f1_macro | best_epoch | run_dir                                                         |
+| ----------- | ------------ | -------- | --------------- | ------------ | -------- | ---------- | --------------------------------------------------------------- |
+| resnet18    | pretrained   | 0.8600   | 0.8609          | 0.8600       | 0.8591   | 4          | runs\image_benchmark\resnet18\medium-seed13-resnet18-pretrained |
+| densenet121 | from scratch | 0.6933   | 0.7452          | 0.6933       | 0.6819   | 5          | runs\image_benchmark\densenet121\medium-seed13-densenet121      |
 
 ### resnet18 pretrained - `medium-seed13-resnet18-pretrained`
 
@@ -222,6 +234,16 @@ Dominant off-diagonal confusions: QSO -> STAR: 18; STAR -> QSO: 12; QSO -> GALAX
 | QSO       | 22   | 13     | 115 |
 
 Dominant off-diagonal confusions: QSO -> STAR: 22; STAR -> QSO: 14; QSO -> GALAXY: 13; GALAXY -> STAR: 7.
+
+### densenet121 - `medium-seed13-densenet121`
+
+| true\pred | STAR | GALAXY | QSO |
+| --------- | ---- | ------ | --- |
+| STAR      | 135  | 0      | 15  |
+| GALAXY    | 24   | 66     | 60  |
+| QSO       | 35   | 4      | 111 |
+
+Dominant off-diagonal confusions: GALAXY -> QSO: 60; QSO -> STAR: 35; GALAXY -> STAR: 24; STAR -> QSO: 15.
 
 ### Small vs medium - seed 42
 
@@ -284,6 +306,67 @@ Repeat `densenet121` on medium seeds 123 and 13 before final model selection, be
 Do not prioritize another `simple_cnn` repetition now; it is useful as a floor baseline but is not the leading candidate.
 
 Scaling to n_per_class=2000 is reasonable after the DenseNet robustness check, keeping the model set fixed.
+
+## Medium robustness - DenseNet121
+
+| run         | F1 seed 42 | F1 seed 123 | F1 seed 13 | mean F1 | std F1 | acc seed 42 | acc seed 123 | acc seed 13 | mean acc | std acc |
+| ----------- | ---------- | ----------- | ---------- | ------- | ------ | ----------- | ------------ | ----------- | -------- | ------- |
+| densenet121 | 0.8778     | 0.5189      | 0.6819     | 0.6929  | 0.1467 | 0.8778      | 0.5867       | 0.6933      | 0.7193   | 0.1203  |
+
+### Train/validation summary - seed 42 - medium-densenet121
+
+Best epoch: 4. At the best epoch, train loss was 0.3952, validation loss was 0.3872, validation accuracy was 0.8600 and validation F1 macro was 0.8587. Test accuracy was 0.8778 and test F1 macro was 0.8778.
+
+| true\pred | STAR | GALAXY | QSO |
+| --------- | ---- | ------ | --- |
+| STAR      | 130  | 7      | 13  |
+| GALAXY    | 11   | 131    | 8   |
+| QSO       | 4    | 12     | 134 |
+
+### Train/validation summary - seed 123 - medium-seed123-densenet121
+
+Best epoch: 5. At the best epoch, train loss was 0.3752, validation loss was 1.1743, validation accuracy was 0.6267 and validation F1 macro was 0.5776. Test accuracy was 0.5867 and test F1 macro was 0.5189.
+
+| true\pred | STAR | GALAXY | QSO |
+| --------- | ---- | ------ | --- |
+| STAR      | 149  | 0      | 1   |
+| GALAXY    | 44   | 104    | 2   |
+| QSO       | 131  | 8      | 11  |
+
+### Train/validation summary - seed 13 - medium-seed13-densenet121
+
+Best epoch: 5. At the best epoch, train loss was 0.3632, validation loss was 0.6920, validation accuracy was 0.7311 and validation F1 macro was 0.7148. Test accuracy was 0.6933 and test F1 macro was 0.6819.
+
+| true\pred | STAR | GALAXY | QSO |
+| --------- | ---- | ------ | --- |
+| STAR      | 135  | 0      | 15  |
+| GALAXY    | 24   | 66     | 60  |
+| QSO       | 35   | 4      | 111 |
+
+DenseNet121 is not competitive with 
+esnet18 pretrained on medium robustness. Seed 42 looked close to ResNet18, but the repeated seeds expose high variance: DenseNet mean F1 is 0.6929 versus 0.8842 for pretrained ResNet18, and DenseNet F1 std is 0.1467 versus 0.0179.
+
+The failure modes are seed-dependent. Seed 123 collapses QSO recall, sending 131/150 QSO examples to STAR and recovering only 11/150 QSO. Seed 13 recovers QSO better than seed 123, but GALAXY recall collapses, with 60/150 GALAXY predicted as QSO and 24/150 as STAR. By contrast, pretrained ResNet18 keeps all three medium seeds in the F1 range 0.8591-0.8998.
+
+Recommendation: do not carry DenseNet121 as a primary model into the next scale. Keep 
+esnet18 pretrained as the main Phase 1 image baseline; DenseNet121 can remain documented as a negative robustness result, but the next medium/large compute should not prioritize it.
+
+## Medium model synthesis
+
+| model               | seeds available | mean F1 | std F1 | mean acc | std acc |
+| ------------------- | --------------- | ------- | ------ | -------- | ------- |
+| resnet18 pretrained | 42/123/13       | 0.8842  | 0.0179 | 0.8844   | 0.0175  |
+| densenet121         | 42/123/13       | 0.6929  | 0.1467 | 0.7193   | 0.1203  |
+| simple_cnn          | 42 only         | 0.7217  | n/a    | 0.7356   | n/a     |
+
+The best medium model by mean F1 is 
+esnet18 pretrained. The most stable model among models with three medium seeds is also 
+esnet18 pretrained, with F1 std 0.0179. simple_cnn has only seed 42 on medium, so it does not yet have a medium robustness estimate.
+
+Across the targeted confusions, pretrained ResNet18 is consistently less pathological than DenseNet121. ResNet18 has QSO -> STAR counts of 4, 18 and 22; DenseNet has 4, 131 and 35. ResNet18 has QSO -> GALAXY counts of 7, 7 and 13; DenseNet has 12, 8 and 4. ResNet18 has GALAXY -> STAR counts of 8, 5 and 7; DenseNet has 11, 44 and 24. The decisive difference is not QSO -> GALAXY, where DenseNet is sometimes lower, but the severe DenseNet QSO -> STAR and GALAXY -> STAR/GALAXY -> QSO instability across seeds.
+
+For the next Phase 1 step, prioritize scaling 
+esnet18 pretrained to n_per_class=2000. Repeating simple_cnn on medium seeds 123/13 is lower value unless a complete baseline floor is needed. Do not add MobileNet, ResNet50 or EfficientNet yet; new architectures would expand the search before resolving the scale question for the current winner. After the n_per_class=2000 image-only run is complete, decide whether Phase 1 has enough evidence to close and then prepare Phase 2 separately.
 
 ## Benchmark From Scratch - Aggregate F1 Macro By Model
 
