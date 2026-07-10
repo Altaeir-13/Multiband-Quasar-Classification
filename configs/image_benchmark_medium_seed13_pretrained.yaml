@@ -1,0 +1,51 @@
+project:
+  seed: 13
+  class_mapping:
+    STAR: 0
+    GALAXY: 1
+    QSO: 2
+
+paths:
+  candidates_csv: data/raw/catalogs/sdss_dr17_candidates_medium_seed13.csv
+  metadata_csv: data/processed/image_sample_medium_seed13/metadata.csv
+  class_mapping_json: data/processed/image_sample_medium_seed13/class_mapping.json
+  metadata_validation_json: data/processed/image_sample_medium_seed13/metadata_validation.json
+  image_root: data/raw/images_medium_seed13
+  reports_dir: reports/image_benchmark
+  runs_dir: runs/image_benchmark
+
+sdss:
+  sql_endpoint: https://skyserver.sdss.org/dr17/SkyServerWS/SearchTools/SqlSearch
+  imgcutout_endpoint: https://skyserver.sdss.org/dr17/SkyServerWS/ImgCutout/getjpeg
+  classes: [STAR, GALAXY, QSO]
+  candidate_rows_per_class: 3000
+  science_primary: false
+  zwarning_zero: false
+  clean_photometry: false
+
+sample:
+  n_per_class: 1000
+  train_size: 0.70
+  val_size: 0.15
+  test_size: 0.15
+
+cutouts:
+  width: 128
+  height: 128
+  scale: 0.396
+  opt: ""
+  retries: 3
+  timeout_seconds: 30
+  request_sleep_seconds: 0.10
+
+training:
+  image_size: 128
+  batch_size: 32
+  epochs: 10
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  num_workers: 0
+  patience: 3
+  device: auto
+  pretrained: true
+  models: [simple_cnn, resnet18, densenet121]

@@ -407,15 +407,165 @@ def _medium_interpretation(medium_metrics: pd.DataFrame, small_metrics: pd.DataF
         else:
             labels = ", ".join(f"`{row.run}`" for row in improved.itertuples(index=False))
             lines.append(f"Medium seed 42 improved F1 over small seed 42 for: {labels}.")
-    lines.append(
-        "A single medium seed cannot prove lower variance or instability reduction; repeat medium on more seeds before drawing a stability conclusion."
-    )
+    medium_seed_count = medium_metrics["seed"].nunique()
+    if medium_seed_count > 1:
+        lines.append(
+            "Medium now has repeated seeds for `resnet18 pretrained`; use the robustness section for the variance conclusion."
+        )
+    else:
+        lines.append(
+            "A single medium seed cannot prove lower variance or instability reduction; repeat medium on more seeds before drawing a stability conclusion."
+        )
     lines.append(
         "Inspect QSO -> STAR, QSO -> GALAXY and GALAXY -> STAR confusions before either scaling to n_per_class=2000 or adding new architectures."
     )
     return lines
 
 
+def _medium_resnet_pretrained_table(medium_metrics: pd.DataFrame) -> pd.DataFrame:
+    run_metrics = medium_metrics[
+        (medium_metrics["model"] == "resnet18") & (medium_metrics["pretrained"].map(_is_pretrained))
+    ].copy()
+    f1_values = {
+        seed: run_metrics.loc[run_metrics["seed"] == seed, "f1_macro"].iloc[0]
+        if not run_metrics.loc[run_metrics["seed"] == seed].empty
+        else pd.NA
+        for seed in SEED_ORDER
+    }
+    acc_values = {
+        seed: run_metrics.loc[run_metrics["seed"] == seed, "accuracy"].iloc[0]
+        if not run_metrics.loc[run_metrics["seed"] == seed].empty
+        else pd.NA
+        for seed in SEED_ORDER
+    }
+    f1_present = pd.Series([value for value in f1_values.values() if not pd.isna(value)], dtype="float64")
+    acc_present = pd.Series([value for value in acc_values.values() if not pd.isna(value)], dtype="float64")
+    return pd.DataFrame(
+        [
+            {
+                "run": "resnet18 pretrained",
+                "F1 seed 42": f1_values["42"],
+                "F1 seed 123": f1_values["123"],
+                "F1 seed 13": f1_values["13"],
+                "mean F1": f1_present.mean() if not f1_present.empty else pd.NA,
+                "std F1": f1_present.std(ddof=0)
+                if len(f1_present) > 1
+                else 0.0
+                if len(f1_present) == 1
+                else pd.NA,
+                "acc seed 42": acc_values["42"],
+                "acc seed 123": acc_values["123"],
+                "acc seed 13": acc_values["13"],
+                "mean acc": acc_present.mean() if not acc_present.empty else pd.NA,
+                "std acc": acc_present.std(ddof=0)
+                if len(acc_present) > 1
+                else 0.0
+                if len(acc_present) == 1
+                else pd.NA,
+            }
+        ]
+    )
+
+
+def _metric_file_for_run(
+    metric_files: list[dict[str, Any]],
+    *,
+    scale: str,
+    seed: str,
+    model: str,
+    pretrained: bool,
+) -> dict[str, Any] | None:
+    for metrics in metric_files:
+        flattened = _flatten_metrics(metrics)
+        if metrics.get("split") != "test":
+            continue
+        if flattened["model"] != model:
+            continue
+        if _scale_from_run_dir(flattened["run_dir"]) != scale:
+            continue
+        if _seed_from_run_dir(flattened["run_dir"]) != seed:
+            continue
+        if _is_pretrained(flattened["pretrained"]) != pretrained:
+            continue
+        return metrics
+    return None
+
+
+def _medium_robustness_lines(medium_table: pd.DataFrame, small_metrics: pd.DataFrame) -> list[str]:
+    if medium_table.empty:
+        return []
+    row = medium_table.iloc[0]
+    if any(pd.isna(row[column]) for column in ["F1 seed 42", "F1 seed 123", "F1 seed 13"]):
+        return ["Medium robustness metrics are incomplete for the three requested seeds."]
+
+    seed42_delta = row["F1 seed 42"] - row["mean F1"]
+    seed13_delta = row["F1 seed 13"] - row["mean F1"]
+    lines = [
+        (
+            f"Seed 42 was representative for this medium pretrained ResNet18 run: "
+            f"its F1 differs from the three-seed mean by {seed42_delta:+.4f}."
+        ),
+        (
+            f"Seed 13 is the lower-tail sample in this repetition "
+            f"(delta from mean F1 {seed13_delta:+.4f}), so seed 42 alone was mildly optimistic."
+        ),
+        (
+            "`resnet18 pretrained` remains stable at medium scale: all three runs stay between "
+            f"F1={row['F1 seed 13']:.4f} and F1={row['F1 seed 123']:.4f}, "
+            f"with std F1={row['std F1']:.4f}."
+        ),
+    ]
+
+    small_pilot = _transfer_learning_pilot_table(small_metrics)
+    pretrained_small = small_pilot[small_pilot["run"] == "resnet18 pretrained"]
+    if not pretrained_small.empty and not pd.isna(pretrained_small.iloc[0]["std F1"]):
+        small_std = pretrained_small.iloc[0]["std F1"]
+        delta_std = row["std F1"] - small_std
+        direction = "did not reduce" if delta_std > 0 else "reduced"
+        lines.append(
+            f"Compared with the small pretrained ResNet18 pilot, medium {direction} "
+            f"seed-to-seed F1 variance (small std {small_std:.4f}, medium std {row['std F1']:.4f}). "
+            "It did raise the mean performance, so scale improved level more clearly than variance."
+        )
+
+    lines.extend(
+        [
+            "Repeat `densenet121` on medium seeds 123 and 13 before final model selection, because seed 42 was close to ResNet18.",
+            "Do not prioritize another `simple_cnn` repetition now; it is useful as a floor baseline but is not the leading candidate.",
+            "Scaling to n_per_class=2000 is reasonable after the DenseNet robustness check, keeping the model set fixed.",
+        ]
+    )
+    return lines
+
+
+def _write_medium_robustness(
+    handle,
+    medium_metrics: pd.DataFrame,
+    small_metrics: pd.DataFrame,
+    metric_files: list[dict[str, Any]],
+) -> None:
+    table = _medium_resnet_pretrained_table(medium_metrics)
+    if table.empty:
+        return
+    handle.write("## Medium robustness - ResNet18 pretrained\n\n")
+    handle.write(_markdown_table(_format_summary_columns(table)))
+    handle.write("\n\n")
+    for seed in SEED_ORDER:
+        metrics = _metric_file_for_run(
+            metric_files,
+            scale="medium",
+            seed=seed,
+            model="resnet18",
+            pretrained=True,
+        )
+        if metrics is None:
+            continue
+        run_dir = _flatten_metrics(metrics)["run_dir"]
+        handle.write(f"### Test confusion matrix - seed {seed} - `{Path(run_dir).name}`\n\n")
+        handle.write(_confusion_matrix_section(metrics))
+        handle.write("\n\n")
+    for line in _medium_robustness_lines(table, small_metrics):
+        handle.write(line + "\n\n")
 def write_model_comparison(
     metrics: pd.DataFrame,
     *,
@@ -442,7 +592,7 @@ def write_model_comparison(
         handle.write("# Image Benchmark Results\n\n")
         handle.write(
             "Phase 1 controlled image benchmark using SDSS JPEG RGB cutouts. "
-            "Small runs compare seeds 42, 123 and 13; medium runs add a controlled n_per_class=1000 seed 42 scale. "
+            "Small runs compare seeds 42, 123 and 13; medium runs add controlled n_per_class=1000 repetitions. "
             "This is still not the final large-scale experiment.\n\n"
         )
         handle.write(
@@ -468,10 +618,13 @@ def write_model_comparison(
             _write_seed_section(handle, small_test_metrics, metric_files, seed, scale="small")
 
         if not medium_test_metrics.empty:
-            _write_seed_section(handle, medium_test_metrics, metric_files, "42", scale="medium")
+            for seed in SEED_ORDER:
+                if not medium_test_metrics[medium_test_metrics["seed"] == seed].empty:
+                    _write_seed_section(handle, medium_test_metrics, metric_files, seed, scale="medium")
             _write_medium_comparison(handle, small_test_metrics, medium_test_metrics)
             for line in _medium_interpretation(medium_test_metrics, small_test_metrics):
                 handle.write(line + "\n\n")
+            _write_medium_robustness(handle, medium_test_metrics, small_test_metrics, metric_files)
 
         handle.write("## Benchmark From Scratch - Aggregate F1 Macro By Model\n\n")
         scratch_metrics = small_test_metrics[~small_test_metrics["pretrained"].map(_is_pretrained)].copy()
